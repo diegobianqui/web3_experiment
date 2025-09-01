@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Django + MetaMask Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        body {
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+            max-width: 720px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        button {
+            padding: .6rem 1rem;
+            border-radius: .6rem;
+            border: 1px solid #ddd;
+            cursor: pointer;
+        }
+
+        .row {
+            display: flex;
+            gap: .5rem;
+            flex-wrap: wrap;
+            margin: 1rem 0;
+        }
+
+        #log {
+            background: #f9fafb;
+            border: 1px solid #eee;
+            padding: 1rem;
+            border-radius: .6rem;
+            min-height: 3rem;
+        }
+
+        code {
+            background: #f3f4f6;
+            padding: .1rem .3rem;
+            border-radius: .3rem;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Login con MetaMask (Django Sessions)</h1>
+
+    <div class="row">
+        <button id="connect">Conectar & Login</button>
+        <button id="dashboard">Probar /dashboard (requiere sesión)</button>
+        <button id="logout">Logout</button>
+    </div>
+
+    <p><strong>Cuenta:</strong> <span id="account">—</span></p>
+    <p><strong>Estado:</strong> <span id="status">Listo</span></p>
+
+    <h3>Log</h3>
+    <div id="log"></div>
+
+    <script>
+        const $ = (id) => document.getElementById(id);
+        const accountEl = $("account");
+        const statusEl = $("status");
+        const logEl = $("log");
+
+        function log(...args) {
+            const line = document.createElement("div");
+            line.textContent = args.map(String).join(" ");
+            logEl.appendChild(line);
+        }
+
+        function hasEthereum() {
+            return typeof window.ethereum !== "undefined";
+        }
+
+        // (Opcional) Helper para solicitar Sepolia
+        async function ensureSepolia() {
+            // Descomenta si querés forzar Sepolia:
+            // await ethereum.request({
+            //   method: 'wallet_addEthereumChain',
+            //   params: [{
+            //     chainId: '0xaa36a7', // Sepolia
+            //     chainName: 'Sepolia',
+            //     nativeCurrency: { name: 'SepoliaETH', symbol: 'ETH', decimals: 18 },
+            //     rpcUrls: ['https://rpc.sepolia.org'],
+            //     blockExplorerUrls: ['https://sepolia.etherscan.io'],
+            //   }]
+            // });
+        }
+
+        async function connectAndLogin() {
+            if (!hasEthereum()) {
+                alert("MetaMask no está instalado");
+                return;
+            }
+            try {
+                statusEl.textContent = "Solicitando cuentas...";
+                const accounts = await ethereum.request({ method: "eth_requestAccounts" });
+                const account = accounts[0];
+                accountEl.textContent = account;
+                log("Cuenta:", account);
+
+                // (Opcional) red de prueba
+                // await ensureSepolia();
+
+                // 1) pedir nonce
+                statusEl.textContent = "Pidiendo nonce al backend...";
+                const nonceRes = await fetch("/get-nonce/", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "same-origin",
+                    body: JSON.stringify({ address: account })
+                });
+                const nonceData = await nonceRes.json();
+                if (!nonceRes.ok) {
+                    throw new Error(nonceData.error || "Error get-nonce");
+                }
+                log("Nonce recibido:", nonceData.nonce);
+
+                // 2) firmar mensaje
+                const message = `Login nonce: ${nonceData.nonce}`;
+                statusEl.textContent = "Firmando mensaje en MetaMask...";
+                const signature = await ethereum.request({
+                    method: "personal_sign",
+                    params: [message, account],
+                });
+                log("Signature:", signature);
+
+                // 3) enviar firma para verificar + crear sesión
+                statusEl.textContent = "Verificando firma en backend...";
+                const verifyRes = await fetch("/verify-signature/", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "same-origin",
+                    body: JSON.stringify({ address: account, signature })
+                });
+                const verifyData = await verifyRes.json();
+                if (!verifyRes.ok || !verifyData.success) {
+                    throw new Error(verifyData.error || "Firma inválida");
+                }
+                statusEl.textContent = `✅ Login correcto: ${verifyData.address}`;
+                log("Login OK");
+            } catch (err) {
+                statusEl.textContent = "❌ Error";
+                log("Error:", err.message || err);
+                console.error(err);
+            }
+        }
+
+        async function hitDashboard() {
+            const res = await fetch("/dashboard/", { credentials: "same-origin" });
+            if (res.status === 200) {
+                const data = await res.json();
+                statusEl.textContent = "Dashboard OK";
+                log("Dashboard:", JSON.stringify(data));
+            } else {
+                statusEl.textContent = "Dashboard bloqueado";
+                log("Dashboard HTTP", res.status, "(Probá loguearte primero)");
+            }
+        }
+
+        async function doLogout() {
+            await fetch("/logout/", { credentials: "same-origin" });
+            statusEl.textContent = "Sesión cerrada";
+            log("Logout OK");
+        }
+
+        $("connect").onclick = connectAndLogin;
+        $("dashboard").onclick = hitDashboard;
+        $("logout").onclick = doLogout;
+
+        // Si cambia la cuenta en MetaMask, reseteamos UI
+        if (hasEthereum()) {
+            ethereum.on('accountsChanged', (accounts) => {
+                accountEl.textContent = accounts[0] || "—";
+                log("accountsChanged", accounts[0]);
+            });
+        }
+    </script>
+</body>
+
+</html>
