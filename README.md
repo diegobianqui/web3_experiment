@@ -191,5 +191,5 @@ function getCookie(name) {
 - Consider rotating nonces and cleaning stale sessions regularly.
 
 ## License
-MIT (or your preferred license)
+MIT
 
