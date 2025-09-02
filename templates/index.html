@@ -1,92 +1,181 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 
 <head>
-    <meta charset="UTF-8" />
+    <meta charset="UTF-8">
     <title>Django + MetaMask Login</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
         body {
-            font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-            max-width: 720px;
-            margin: 2rem auto;
-            padding: 0 1rem;
+            font-family: sans-serif;
+            margin: 0;
+            padding: 0;
         }
 
-        button {
-            padding: .6rem 1rem;
-            border-radius: .6rem;
-            border: 1px solid #ddd;
+        header {
+            background: #f5f5f5;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 20px;
+        }
+
+        #walletButton {
+            padding: 8px 12px;
+            background: #ff9800;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            color: white;
+            font-weight: bold;
+        }
+
+        #walletIcon {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: #3f51b5;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
             cursor: pointer;
         }
 
-        .row {
-            display: flex;
-            gap: .5rem;
-            flex-wrap: wrap;
-            margin: 1rem 0;
+        #walletMenu {
+            position: absolute;
+            right: 20px;
+            top: 60px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            padding: 10px;
         }
 
-        #log {
-            background: #f9fafb;
-            border: 1px solid #eee;
-            padding: 1rem;
-            border-radius: .6rem;
-            min-height: 3rem;
+        .hidden {
+            display: none;
         }
 
-        code {
-            background: #f3f4f6;
-            padding: .1rem .3rem;
-            border-radius: .3rem;
+        .balance-box,
+        .tx-box,
+        .nft-box {
+            margin: 20px auto;
+            padding: 15px;
+            max-width: 600px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #fafafa;
+        }
+
+        .tx-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .tx-list li {
+            margin: 5px 0;
+        }
+
+        .tx-list a {
+            color: #3f51b5;
+            text-decoration: none;
+        }
+
+        .tx-list a:hover {
+            text-decoration: underline;
+        }
+
+        .nft-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .nft-item {
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 5px;
+            text-align: center;
+            font-size: 12px;
+        }
+
+        .nft-item img {
+            max-width: 100%;
+            border-radius: 4px;
         }
     </style>
 </head>
 
 <body>
-    <h1>Login con MetaMask (Django Sessions)</h1>
+    <header>
+        <h2>DApp Django</h2>
+        <button id="walletButton">Conectar Wallet</button>
+        <div id="walletIcon" class="hidden"></div>
+    </header>
 
-    <div class="row">
-        <button id="connect">Conectar & Login</button>
-        <button id="dashboard">Probar /dashboard (requiere sesión)</button>
+    <div id="walletMenu" class="hidden">
+        <p><strong>Cuenta:</strong> <span id="account">—</span></p>
         <button id="logout">Logout</button>
     </div>
 
-    <p><strong>Cuenta:</strong> <span id="account">—</span></p>
-    <p><strong>Estado:</strong> <span id="status">Listo</span></p>
+    <main style="padding:20px;">
+        <h3>Estado:</h3>
+        <div id="status">No conectado</div>
 
-    <h3>Log</h3>
-    <div id="log"></div>
+        <div class="balance-box hidden" id="balancesBox">
+            <h3>Balances</h3>
+            <p><strong>SepoliaETH:</strong> <span id="ethBalance">—</span></p>
+            <p><strong>LINK:</strong> <span id="linkBalance">—</span></p>
+        </div>
 
+        <div class="tx-box hidden" id="txBox">
+            <h3>Transacciones</h3>
+            <ul id="txList" class="tx-list"></ul>
+            <button id="loadMoreTx" class="hidden">Cargar más</button>
+        </div>
+
+        <div class="nft-box hidden" id="nftBox">
+            <h3>NFTs</h3>
+            <div id="nftGrid" class="nft-grid"></div>
+        </div>
+    </main>
+
+    <!-- Bloque Script -->
     <script>
-        const $ = (id) => document.getElementById(id);
-        const accountEl = $("account");
+        const $ = id => document.getElementById(id);
+        const log = (...args) => console.log("[DApp]", ...args);
+        const hasEthereum = () => typeof window.ethereum !== "undefined";
+
+        const ALCHEMY_KEY = "d1Mh-JReAcmQ28NIBDnBT9E6e5D9eUZd";
+        const ALCHEMY_BASE = `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_KEY}`;
+
         const statusEl = $("status");
-        const logEl = $("log");
+        const walletButton = $("walletButton");
+        const walletIcon = $("walletIcon");
+        const walletMenu = $("walletMenu");
+        const accountEl = $("account");
 
-        function log(...args) {
-            const line = document.createElement("div");
-            line.textContent = args.map(String).join(" ");
-            logEl.appendChild(line);
+        const ethBalanceEl = $("ethBalance");
+        const linkBalanceEl = $("linkBalance");
+        const balancesBox = $("balancesBox");
+
+        const txBox = $("txBox");
+        const txList = $("txList");
+        const loadMoreTx = $("loadMoreTx");
+
+        const nftBox = $("nftBox");
+        const nftGrid = $("nftGrid");
+
+        let currentAccount = null;
+        let txPageKey = null;
+
+        function shortenAddress(addr) {
+            return addr.slice(0, 6) + "…" + addr.slice(-4);
         }
-
-        function hasEthereum() {
-            return typeof window.ethereum !== "undefined";
-        }
-
-        // (Opcional) Helper para solicitar Sepolia
-        async function ensureSepolia() {
-            // Descomenta si querés forzar Sepolia:
-            // await ethereum.request({
-            //   method: 'wallet_addEthereumChain',
-            //   params: [{
-            //     chainId: '0xaa36a7', // Sepolia
-            //     chainName: 'Sepolia',
-            //     nativeCurrency: { name: 'SepoliaETH', symbol: 'ETH', decimals: 18 },
-            //     rpcUrls: ['https://rpc.sepolia.org'],
-            //     blockExplorerUrls: ['https://sepolia.etherscan.io'],
-            //   }]
-            // });
+        function addressInitials(addr) {
+            return addr.slice(2, 4).toUpperCase();
         }
 
         async function connectAndLogin() {
@@ -98,85 +187,180 @@
                 statusEl.textContent = "Solicitando cuentas...";
                 const accounts = await ethereum.request({ method: "eth_requestAccounts" });
                 const account = accounts[0];
+                currentAccount = account;
                 accountEl.textContent = account;
                 log("Cuenta:", account);
 
-                // (Opcional) red de prueba
-                // await ensureSepolia();
-
-                // 1) pedir nonce
-                statusEl.textContent = "Pidiendo nonce al backend...";
+                // Pedir nonce al backend
                 const nonceRes = await fetch("/get-nonce/", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     credentials: "same-origin",
                     body: JSON.stringify({ address: account })
                 });
-                const nonceData = await nonceRes.json();
-                if (!nonceRes.ok) {
-                    throw new Error(nonceData.error || "Error get-nonce");
-                }
-                log("Nonce recibido:", nonceData.nonce);
+                const { nonce } = await nonceRes.json();
 
-                // 2) firmar mensaje
-                const message = `Login nonce: ${nonceData.nonce}`;
-                statusEl.textContent = "Firmando mensaje en MetaMask...";
+                // Firmar mensaje
+                const message = `Login nonce: ${nonce}`;
                 const signature = await ethereum.request({
                     method: "personal_sign",
                     params: [message, account],
                 });
-                log("Signature:", signature);
 
-                // 3) enviar firma para verificar + crear sesión
-                statusEl.textContent = "Verificando firma en backend...";
+                // Verificar firma
                 const verifyRes = await fetch("/verify-signature/", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     credentials: "same-origin",
                     body: JSON.stringify({ address: account, signature })
                 });
-                const verifyData = await verifyRes.json();
-                if (!verifyRes.ok || !verifyData.success) {
-                    throw new Error(verifyData.error || "Firma inválida");
+                const result = await verifyRes.json();
+
+                if (result.success) {
+                    statusEl.textContent = `✅ Login: ${shortenAddress(result.address)}`;
+                    walletButton.classList.add("hidden");
+                    walletIcon.classList.remove("hidden");
+                    walletIcon.textContent = addressInitials(account);
+
+                    balancesBox.classList.remove("hidden");
+                    txBox.classList.remove("hidden");
+                    nftBox.classList.remove("hidden");
+
+                    await loadBalances(account);
+                    await loadTransactions(account);
+                    await loadNFTs(account);
+                } else {
+                    throw new Error(result.error || "Firma inválida");
                 }
-                statusEl.textContent = `✅ Login correcto: ${verifyData.address}`;
-                log("Login OK");
             } catch (err) {
                 statusEl.textContent = "❌ Error";
                 log("Error:", err.message || err);
-                console.error(err);
             }
         }
 
-        async function hitDashboard() {
-            const res = await fetch("/dashboard/", { credentials: "same-origin" });
-            if (res.status === 200) {
+        async function loadBalances(account) {
+            try {
+                const url = `${ALCHEMY_BASE}`;
+                const payload = {
+                    jsonrpc: "2.0",
+                    id: 1,
+                    method: "alchemy_getTokenBalances",
+                    params: [account, ["0x779877A7B0D9E8603169DdbD7836e478b4624789"]] // LINK en Sepolia
+                };
+                const [ethRes, linkRes] = await Promise.all([
+                    fetch(url, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            jsonrpc: "2.0",
+                            id: 0,
+                            method: "eth_getBalance",
+                            params: [account, "latest"]
+                        })
+                    }).then(r => r.json()),
+                    fetch(url, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    }).then(r => r.json())
+                ]);
+                const ethBal = parseInt(ethRes.result, 16) / 1e18;
+                ethBalanceEl.textContent = ethBal.toFixed(4);
+
+                const linkData = linkRes.result.tokenBalances[0];
+                const linkBal = parseInt(linkData.tokenBalance, 16) / 1e18;
+                linkBalanceEl.textContent = linkBal.toFixed(4);
+            } catch (err) {
+                log("Balance error:", err);
+                ethBalanceEl.textContent = "Error";
+                linkBalanceEl.textContent = "Error";
+            }
+        }
+
+        async function loadTransactions(account, append = false) {
+            try {
+                const url = `${ALCHEMY_BASE}`;
+                const payload = {
+                    jsonrpc: "2.0",
+                    id: 1,
+                    method: "alchemy_getAssetTransfers",
+                    params: [{
+                        fromBlock: "0x0",
+                        toBlock: "latest",
+                        fromAddress: account,
+                        category: ["external", "erc20", "erc721", "erc1155"],
+                        withMetadata: false,
+                        excludeZeroValue: true,
+                        maxCount: "0x5",
+                        pageKey: txPageKey || undefined
+                    }]
+                };
+                const res = await fetch(url, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
                 const data = await res.json();
-                statusEl.textContent = "Dashboard OK";
-                log("Dashboard:", JSON.stringify(data));
-            } else {
-                statusEl.textContent = "Dashboard bloqueado";
-                log("Dashboard HTTP", res.status, "(Probá loguearte primero)");
+                if (!append) txList.innerHTML = "";
+                data.result.transfers.forEach(tx => {
+                    const li = document.createElement("li");
+                    li.innerHTML = `
+            <a href="https://sepolia.etherscan.io/tx/${tx.hash}" target="_blank">
+              ${shortenAddress(tx.from)} → ${shortenAddress(tx.to)} | ${tx.value || "0"} ${tx.asset}
+            </a>
+          `;
+                    txList.appendChild(li);
+                });
+                txPageKey = data.result.pageKey || null;
+                loadMoreTx.classList.toggle("hidden", !txPageKey);
+            } catch (err) {
+                log("Tx error:", err);
+                txList.innerHTML = "<li>Error al cargar transacciones</li>";
+            }
+        }
+
+        async function loadNFTs(account) {
+            try {
+                const url = `${ALCHEMY_BASE}/getNFTs/?owner=${account}`;
+                const res = await fetch(url);
+                const data = await res.json();
+                nftGrid.innerHTML = "";
+                if (data.ownedNfts && data.ownedNfts.length > 0) {
+                    data.ownedNfts.forEach(nft => {
+                        const div = document.createElement("div");
+                        div.className = "nft-item";
+                        const img = nft.media && nft.media[0] ? nft.media[0].gateway : "";
+                        div.innerHTML = `
+              ${img ? `<img src="${img}" alt="NFT">` : ""}
+              <div>${nft.title || "NFT"}</div>
+            `;
+                        nftGrid.appendChild(div);
+                    });
+                } else {
+                    nftGrid.innerHTML = "<p>No se encontraron NFTs</p>";
+                }
+            } catch (err) {
+                log("NFT error:", err);
+                nftGrid.innerHTML = "<p>Error al cargar NFTs</p>";
             }
         }
 
         async function doLogout() {
             await fetch("/logout/", { credentials: "same-origin" });
             statusEl.textContent = "Sesión cerrada";
-            log("Logout OK");
+            walletButton.classList.remove("hidden");
+            walletIcon.classList.add("hidden");
+            walletMenu.classList.add("hidden");
+            accountEl.textContent = "—";
+            balancesBox.classList.add("hidden");
+            txBox.classList.add("hidden");
+            nftBox.classList.add("hidden");
         }
 
-        $("connect").onclick = connectAndLogin;
-        $("dashboard").onclick = hitDashboard;
+        walletButton.onclick = connectAndLogin;
+        walletIcon.onclick = () => walletMenu.classList.toggle("hidden");
         $("logout").onclick = doLogout;
-
-        // Si cambia la cuenta en MetaMask, reseteamos UI
-        if (hasEthereum()) {
-            ethereum.on('accountsChanged', (accounts) => {
-                accountEl.textContent = accounts[0] || "—";
-                log("accountsChanged", accounts[0]);
-            });
-        }
+        loadMoreTx.onclick = () => loadTransactions(currentAccount, true);
     </script>
 </body>
 
